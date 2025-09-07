@@ -51,6 +51,7 @@ before you include this file in *one* C/C++ file to create the implementation.
 typedef struct buffer_t buffer_t;
 
 buffer_t* buffer_create( void );
+buffer_t* buffer_fifo_create( int size );
 buffer_t* buffer_load( const char* filename );
 buffer_t* buffer_map( void* data, size_t size );
 void buffer_destroy( buffer_t* buffer );
@@ -59,7 +60,12 @@ void buffer_resize( buffer_t* buffer, size_t size );
 size_t buffer_position( buffer_t* buffer );
 size_t buffer_position_set( buffer_t* buffer, size_t position );
 size_t buffer_size( buffer_t* buffer );
+size_t buffer_fifo_size( buffer_t* buffer );
 void* buffer_data( buffer_t* buffer );
+int buffer_read( buffer_t* buffer, void* value, int size );
+int buffer_write( buffer_t* buffer, void const* value, int size );
+int buffer_pop( buffer_t* buffer, void* value, int size );
+int buffer_push( buffer_t* buffer, void const* value, int size );
 
 int buffer_read_char( buffer_t* buffer, char* value, int count );
 int buffer_read_i8( buffer_t* buffer, BUFFER_I8_T* value, int count );
@@ -74,6 +80,7 @@ int buffer_read_float( buffer_t* buffer, float* value, int count );
 int buffer_read_double( buffer_t* buffer, double* value, int count );
 int buffer_read_bool( buffer_t* buffer, bool* value, int count );
 
+
 int buffer_write_char( buffer_t* buffer, char const* value, int count );
 int buffer_write_i8( buffer_t* buffer, BUFFER_I8_T const* value, int count );
 int buffer_write_i16( buffer_t* buffer, BUFFER_I16_T const* value, int count );
@@ -86,6 +93,7 @@ int buffer_write_u64( buffer_t* buffer, BUFFER_U64_T const* value, int count );
 int buffer_write_float( buffer_t* buffer, float const* value, int count );
 int buffer_write_double( buffer_t* buffer, double const* value, int count );
 int buffer_write_bool( buffer_t* buffer, bool const* value, int count );
+
 
 #endif /* buffer_h */
 
@@ -114,6 +122,9 @@ struct buffer_t {
     size_t capacity;
     size_t size;
     size_t position;
+    size_t write_position;
+    size_t read_position;
+    size_t circular_size;
     void* data;
     int is_mapped;
 };
@@ -126,6 +137,22 @@ buffer_t* buffer_create( void ) {
     buffer->position = 0;
     buffer->data = malloc( buffer->capacity );
     buffer->is_mapped = 0;
+    buffer->circular_size = 0;
+    buffer->write_position = 0;
+    buffer->read_position = 0;
+    return buffer;
+}
+
+buffer_t* buffer_fifo_create( int size ) {
+    buffer_t* buffer = (buffer_t*) malloc( sizeof( buffer_t) );
+    buffer->capacity = size;
+    buffer->size = size;
+    buffer->position = 0;
+    buffer->data = malloc( buffer->capacity );
+    buffer->is_mapped = 0;
+    buffer->circular_size = 0;
+    buffer->write_position = 0;
+    buffer->read_position = 0;
     return buffer;
 }
 
@@ -158,6 +185,7 @@ buffer_t* buffer_load( const char* filename ) {
     buffer->position = 0;
     buffer->data = data;
     buffer->is_mapped = 0;
+    buffer->circular_size = 0;
     return buffer;
 }
 
@@ -172,6 +200,7 @@ buffer_t* buffer_map( void* data, size_t size ) {
     buffer->position = 0;
     buffer->data = data;
     buffer->is_mapped = 1;
+    buffer->circular_size = 0;
     return buffer;
 }
 
@@ -230,10 +259,84 @@ size_t buffer_size( buffer_t* buffer ) {
     return result;
 }
 
+size_t buffer_fifo_size( buffer_t* buffer ) {
+    size_t result = buffer->circular_size;
+    return result;
+}
+
 
 void* buffer_data( buffer_t* buffer ) {
     return buffer->data;
 }
+
+
+int buffer_read( buffer_t* buffer, void* value, int size )
+{
+    int result = 0; 
+    result = buffer->size - buffer->position - size >= 0 ? size : buffer->size - buffer->position;
+    memcpy( value, (void*)( ( (uintptr_t) buffer->data ) + buffer->position ), size );
+    buffer->position += size;
+    result = size;
+    return result; 
+}
+
+
+int buffer_write( buffer_t* buffer, void const* value, int size )
+{
+    int result = 0; 
+    if( buffer->position + size > buffer->size )
+    {
+        if( buffer->is_mapped ) return result;
+        buffer->size = buffer->position + size;
+        while( buffer->size > buffer->capacity ) { 
+            buffer->capacity *= 2; 
+        } 
+        buffer->data = realloc( buffer->data, buffer->capacity );
+    }
+    memcpy( (void*)( ( (uintptr_t) buffer->data ) + buffer->position ), value, size );
+    buffer->position += size;
+    result = result;
+    return result; 
+}
+
+int buffer_pop( buffer_t* buffer, void* value, int size )
+{
+    int result = 0; 
+    result = buffer->circular_size > size ? size : buffer->circular_size;
+    if(buffer->read_position + result > buffer->size)
+    {
+        memcpy( value, (void*)( ( (uintptr_t) buffer->data ) + buffer->read_position ), buffer->size -  buffer->read_position);
+        memcpy( value + buffer->size -  buffer->read_position, (void*)( (uintptr_t) buffer->data ), result -  buffer->size + buffer->read_position);
+        buffer->read_position = result -  buffer->size + buffer->read_position;
+    }
+    else
+    {
+        memcpy( value, (void*)( ( (uintptr_t) buffer->data ) + buffer->read_position ), result );
+        buffer->read_position = buffer->read_position + result;
+    }
+    buffer->circular_size -= result;
+    return result;
+}
+
+int buffer_push( buffer_t* buffer, void const* value, int size )
+{
+    int result = 0; 
+    result = buffer->size - buffer->circular_size ;
+    result = result > size ? size : result;
+    
+    if( buffer->write_position + result > buffer->size )
+    {
+        memcpy( (void*)( ( (uintptr_t) buffer->data ) + buffer->write_position ), value, buffer->size -  buffer->write_position);
+        memcpy( (void*)(  (uintptr_t) buffer->data )  , value + buffer->size -  buffer->write_position, result - buffer->size + buffer->write_position );
+        buffer->write_position = result - buffer->size + buffer->write_position;
+    }else {
+        memcpy( (void*)( ( (uintptr_t) buffer->data ) + buffer->write_position ), value, result );
+        buffer->write_position += result;
+    }
+    buffer->circular_size += result;
+    return result; 
+}
+
 
 #ifndef BUFFER_BIG_ENDIAN
     #define BUFFER_READ_IMPL \
