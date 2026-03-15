@@ -3,7 +3,7 @@
 		  Licensing information can be found at the end of the file.
 ------------------------------------------------------------------------------
 
-audiosys.h - v0.1 - Sound and music playback (mixing only) for C/C++.
+audiosys.h - v0.2 - Sound and music playback (mixing only) for C/C++.
 
 Do this:
 	#define AUDIOSYS_IMPLEMENTATION
@@ -196,7 +196,7 @@ static void audiosys_internal_handles_init( audiosys_internal_handles_t* handles
 
 
 static void audiosys_internal_handles_term( audiosys_internal_handles_t* handles ) {
-	//AUDIOSYS_FREE( handles->memctx, handles->data );
+	AUDIOSYS_FREE( handles->memctx, handles->data );
 }
 
 
@@ -471,12 +471,12 @@ static AUDIOSYS_U64 audiosys_internal_add_sound( audiosys_t* audiosys, audiosys_
 
 	
 static void audiosys_internal_remove_sound( audiosys_t* audiosys, AUDIOSYS_U64 handle ) {
-	int index = audiosys_internal_handles_index( &audiosys->sounds_handles, audiosys_internal_handles_from_u64( &audiosys->sounds_handles, handle ) );
+	int internal_handle = audiosys_internal_handles_from_u64( &audiosys->sounds_handles, handle );
+	int index = audiosys_internal_handles_index( &audiosys->sounds_handles, internal_handle );
 	if( index < 0 ) {
 		return;
 	}
 
-	audiosys_internal_handles_release( &audiosys->sounds_handles, audiosys_internal_handles_from_u64( &audiosys->sounds_handles, handle ) );
 	audiosys_internal_voice_t* sound_to_remove = &audiosys->sounds[ index ];
 	audiosys_internal_release_source( &sound_to_remove->source );
 
@@ -489,11 +489,17 @@ static void audiosys_internal_remove_sound( audiosys_t* audiosys, AUDIOSYS_U64 h
 		}
 	}
 
-	audiosys_internal_voice_t* last_sound = &audiosys->sounds[ audiosys->sounds_count - 1 ];
-	audiosys_internal_handles_update( &audiosys->sounds_handles, audiosys_internal_handles_from_u64( &audiosys->sounds_handles, last_sound->handle ), index );
-	--audiosys->sounds_count;
+	int last_index = audiosys->sounds_count - 1;
+	if( index != last_index ) {
+		audiosys_internal_voice_t* last_sound = &audiosys->sounds[ last_index ];
+		int last_internal_handle = audiosys_internal_handles_from_u64( &audiosys->sounds_handles, last_sound->handle );
+		AUDIOSYS_ASSERT( last_internal_handle >= 0, "Invalid last sound handle" );
+		*sound_to_remove = *last_sound;
+		audiosys_internal_handles_update( &audiosys->sounds_handles, last_internal_handle, index );
+	}
 
-	*sound_to_remove = *last_sound;
+	audiosys_internal_handles_release( &audiosys->sounds_handles, internal_handle );
+	--audiosys->sounds_count;
 }
 	
 
@@ -1222,6 +1228,12 @@ audiosys_sound_valid_t audiosys_sound_valid(audiosys_t* audiosys, AUDIOSYS_U64 h
 }
 
 #endif /* AUDIOSYS_IMPLEMENTATION */
+
+/*
+revision history:
+    0.2     fixed handle corruption bug
+    0.1     first publicly released version 
+*/
 
 /*
 ------------------------------------------------------------------------------

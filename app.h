@@ -222,7 +222,7 @@ Here's a basic sample program which starts a windowed app and plots random pixel
     }
 
     int main( int argc, char** argv ) {
-        return app_run( app_proc, NULL, NULL, NULL, NULL );
+        return app_run( app_proc, NULL, NULL, NULL );
     }
 
     // pass-through so the program will build with either /SUBSYSTEM:WINDOWS or /SUBSYSTEM:CONSOLE
@@ -695,6 +695,9 @@ gamepad, without querying state or setting vibration.
         #define _CRT_SECURE_NO_WARNINGS
     #endif
     #include <stddef.h>
+    #ifdef __TINYC__
+        #include <stdlib.h>    
+    #endif
     #define APP_GLCALLTYPE __stdcall
     typedef unsigned int APP_GLuint;
     typedef int APP_GLsizei;
